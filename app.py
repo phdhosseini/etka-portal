@@ -2,13 +2,14 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import plotly.express as px
+from datetime import datetime
+import io
 
-# ۱. تنظیمات ساختاری صفحه و استایل‌های فوق پیشرفته راست‌چین ۱۰۰٪ و بهینه‌سازی موبایل
+# ۱. تنظیمات صفحه و تزریق استایل‌های راست‌چین مطلق و بومی‌سازی شده
 st.set_page_config(page_title="سامانه مدیریت زنجیره تامین", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
-    /* فراخوانی و اعمال فونت بومی و استاندارد وزیر */
     @import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazir-font@v30.1.0/dist/font-face.css');
     
     html, body, [data-testid="stAppViewContainer"], .stMarkdown, p, h1, h2, h3, h4, h5, h6, label, span { 
@@ -17,7 +18,7 @@ st.markdown("""
         text-align: right !important; 
     }
     
-    /* اصلاح کامل جداول استریم‌لیت، راست‌چین کردن هدرها و سلول‌ها */
+    /* فورس کردن جداول به راست‌چین بودن مطلق و چینش ستون‌ها از راست به چپ */
     [data-testid="stDataFrame"] *, .stDataFrame *, [data-testid="stTable"] * {
         direction: RTL !important;
         text-align: right !important;
@@ -26,540 +27,306 @@ st.markdown("""
         text-align: right !important; 
         background-color: #1F4E78 !important; 
         color: white !important; 
-        font-weight: bold !important;
     }
-    
-    /* فیکس کردن نمایش اعداد و شماره تلفن‌ها بدون نیاز به دبل کلیک */
-    td { text-align: right !important; white-space: nowrap !important; direction: ltr !important; }
+    td { text-align: right !important; direction: rtl !important; }
 
-    /* مهندسی مجدد سایدبار موبایل و دسکتاپ - حذف دکمه‌های رادیویی حبابی */
-    [data-testid="stSidebar"] { direction: RTL !important; text-align: right !important; right: 0 !important; left: auto !important; border-left: 1px solid #e0e0e0; }
-    [data-testid="stSidebarNav"] { direction: RTL !important; text-align: right !important; }
-    
-    /* زیباسازی دکمه‌های منو و حذف دایره‌های رادیو باتن پیش‌فرض */
-    .stRadio div[role="radiogroup"] { display: block !important; }
-    .stRadio div[role="radiogroup"] > label {
-        display: flex !important;
-        align-items: center !important;
-        background-color: #ffffff !important; 
-        padding: 12px 15px !important; 
-        border-radius: 6px !important; 
-        border-right: 5px solid #1F4E78 !important; 
-        border-left: none !important;
-        font-weight: bold !important; 
-        font-size: 14px !important; 
-        margin-bottom: 8px !important; 
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        cursor: pointer !important;
-        transition: all 0.2s ease-in-out !important;
-    }
-    /* حذف دایره کوچک رادیویی */
-    .stRadio div[role="radiogroup"] > label div[data-testid="stMarker"] { display: none !important; }
-    
-    /* افکت تغییر رنگ بسیار شکیل منو هنگام قرارگیری موس */
-    .stRadio div[role="radiogroup"] > label:hover { 
-        background-color: #1F4E78 !important; 
-        color: #ffffff !important;
+    /* استایل اختصاصی پاپ‌آپ وسط‌چین و عریض */
+    .center-card {
+        background-color: #ffffff;
+        padding: 25px; border-radius: 12px; border: 2px solid #1F4E78;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 20px auto;
+        max-width: 90%; text-align: right; direction: RTL;
     }
     
-    /* استایل پنجره‌های پاپ‌آپ و کارت‌های شناسنامه کالا و شرکت */
-    .id-card {
-        background-color: #f9f9f9;
-        padding: 20px; border-radius: 10px; border-right: 6px solid #1F4E78;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 15px;
+    /* استایل دکمه‌های منوی سفارشی بدون دایره‌های رادیویی حبابی زشت */
+    .menu-btn {
+        display: block; width: 100%; padding: 12px; margin-bottom: 8px;
+        background-color: #f8f9fa; border-right: 5px solid #1F4E78;
+        border-left: none; border-top: none; border-bottom: none;
+        text-align: right; font-weight: bold; cursor: pointer;
     }
-    
-    /* کوچک‌سازی و چیدمان خطی دکمه‌های مینیاتوری عملیات در یک ستون */
-    .mini-btn {
-        display: inline-block; padding: 2px 6px; font-size: 12px; 
-        cursor: pointer; border-radius: 4px; border: 1px solid #ccc; background-color: #fff;
-    }
-    
-    /* پنهان‌سازی بخش‌های مدیریت پیشرفته دیتابیس در لایه کاربری */
-    .stTabs [data-baseweb="tab"] { font-weight: bold !important; font-size: 14px !important; }
+    .menu-btn:hover { background-color: #1F4E78; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
-# ۲. اتصال پایگاه داده نسخه ۷ و اعمال فیلدهای جدید اطلاعاتی کاربران (تلفن و ایمیل)
-conn = sqlite3.connect("etka_scf_platform_v7.db", check_same_thread=False)
+# ۲. مدیریت پایگاه داده و کنترل وضعیت حافظه پورتال
+DB_NAME = "etka_scf_platform_v8.db"
+conn = sqlite3.connect(DB_NAME, check_same_thread=False)
 cursor = conn.cursor()
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS actors (
-    national_id TEXT PRIMARY KEY, registro_id TEXT, economic_code TEXT, name TEXT, 
-    legal_type TEXT, ownership_type TEXT, industry_1 TEXT, industry_2 TEXT, 
-    phone TEXT, contact_name TEXT, contact_phone TEXT, description TEXT)
-""")
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS catalog (
-    product_code TEXT PRIMARY KEY, product_name TEXT, chain_position TEXT, 
-    unit TEXT, order_scale TEXT, eoq REAL, description TEXT)
-""")
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS linkages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, rel_id TEXT, supplier_id TEXT, buyer_id TEXT, 
-    product_code TEXT, fin_scale TEXT, time_frame TEXT, description TEXT)
-""")
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    username TEXT PRIMARY KEY, password TEXT, role TEXT, company_name TEXT, 
-    user_phone TEXT, user_email TEXT, description TEXT)
-""")
+for table_query in [
+    "CREATE TABLE IF NOT EXISTS actors (national_id TEXT PRIMARY KEY, name TEXT, ownership_type TEXT, industry_1 TEXT, phone TEXT, description TEXT)",
+    "CREATE TABLE IF NOT EXISTS catalog (product_code TEXT PRIMARY KEY, product_name TEXT, chain_position TEXT, unit TEXT, order_scale TEXT, eoq REAL, description TEXT)",
+    "CREATE TABLE IF NOT EXISTS linkages (id INTEGER PRIMARY KEY AUTOINCREMENT, rel_id TEXT, supplier_id TEXT, buyer_id TEXT, product_code TEXT, fin_scale TEXT, time_frame TEXT, description TEXT)",
+    "CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT, company_name TEXT, user_phone TEXT, user_email TEXT, description TEXT)"
+]:
+    cursor.execute(table_query)
 conn.commit()
 
-# ۳. متد تزریق خودکار و شبیه‌سازی داده‌های پایه
-def init_system_data():
-    cursor.execute("SELECT COUNT(*) FROM actors")
-    if cursor.fetchone()[0] == 0:
-        etka_cos = [
-            ("10101111101", "4001", "4111", "شرکت صنایع غذایی اتکا", "سهامی خاص", "مالکیت مدیریتی اتکا", "غذایی", "بازرگانی", "02128733", "مدیریت علوی", "09121111101", "هسته محوری تولید روغن هلدینگ"),
-            ("10101111102", "4002", "4112", "شرکت کشت و صنعت اسفراین اتکا", "سهامی خاص", "مالکیت مدیریتی اتکا", "کشاورزی و دامپروری", "-", "02128734", "مدیریت اکبری", "09121111102", "تامین‌کننده زراعی بومی"),
-            ("10101111103", "4003", "4113", "شرکت قند و شکر اتکا", "سهامی خاص", "مالکیت مدیریتی اتکا", "غذایی", "-", "02128735", "مدیریت رضایی", "09121111103", "تامین‌کننده شکر زنجیره ارزش"),
-            ("10101111104", "4004", "4114", "شرکت روغن‌کشی خرمشهر اتکا", "سهامی خاص", "مالکیت مدیریتی اتکا", "غذایی", "شیمیایی و پتروشیمی", "02128736", "مدیریت نوری", "09121111104", "کارخانه استحصال روغن خام"),
-            ("10101111105", "4005", "4115", "شرکت پخش سراسری اتکا", "سهامی عام", "مالکیت مدیریتی اتکا", "بازرگانی", "خدمات و لجستیک", "02128737", "مدیریت حسنی", "09121111105", "لجستیک مویرگی توزیع فرآورده‌ها"),
-            ("10101111106", "4006", "4116", "شرکت لجستیک زنجیره سرد اتکا", "سهامی خاص", "مالکیت مدیریتی اتکا", "خدمات و لجستیک", "-", "02128738", "مدیریت کرمی", "09121111106", "توزیع سرد اقلام پروتئینی"),
-            ("10101111107", "4007", "4117", "شرکت صنایع شوینده فجر اتکا", "سهامی خاص", "مالکیت مدیریتی اتکا", "شوینده و بهداشتی", "-", "02128739", "مدیریت شوینده", "09121111107", "تولید فرآورده‌های بهداشتی زنجیره"),
-            ("10101111108", "4008", "4118", "شرکت کارتن و بسته‌بندی اتکا", "سهامی خاص", "مالکیت مدیریتی اتکا", "بسته‌بندی و سلولوزی", "-", "02128740", "مدیریت بسته‌بندی", "09121111108", "تولید ملزومات سلولوزی زنجیره")
-        ]
-        ext_cos = [
-            ("10202222201", "5001", "5111", "هلدینگ پتروشیمی خلیج فارس", "سهامی عام", "مالکیت بیرونی", "شیمیایی و پتروشیمی", "-", "02188221", "مدیریت شریفی", "09122222201", "تامین‌کننده مواد پت پلاستیکی"),
-            ("10202222205", "5005", "5115", "شرکت توسعه کشت دانه های روغنی", "سهامی خاص", "مالکیت بیرونی", "کشاورزی و دامپروری", "غذایی", "02188225", "مدیریت تامین دانه", "09122222205", "تامین مواد اولیه کشاورزی دانه‌های روغنی")
-        ]
-        for c in etka_cos: cursor.execute("INSERT INTO actors VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", c)
-        for c in ext_cos: cursor.execute("INSERT INTO actors VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", c)
-        for act in etka_cos + ext_cos: 
-            cursor.execute("INSERT OR IGNORE INTO users VALUES (?,?,'user',?,?,?,?)", (act[0], "12345", act[3], "02188888", "info@company.ir", "اکانت رسمی بازیگر زنجیره"))
-        
-        prods = [
-            ("MESC-101", "روغن خام آفتابگردان فله", "مواد اولیه (Raw Materials)", "تن", "تانکر ۲۵ تنی", 500.0, "اساسی‌ترین ماده اولیه فرآوری روغن"),
-            ("MESC-102", "گرانول پلی‌اتیلن تفتان (PET)", "مواد اولیه (Raw Materials)", "کیلوگرم", "جامبوبگ ۱ تنی", 120.0, "ساخت پت و گالن‌های روغن مایع"),
-            ("IRC-301", "روغن مایع آفتابگردان ۸۰۰ گرمی اتکا", "محصول نهایی (Final Product)", "کارتن", "پالت ۱۲۰ کارتنی", 1000.0, "توزیع نهایی فروشگاهی")
-        ]
-        for p in prods: cursor.execute("INSERT INTO catalog VALUES (?,?,?,?,?,?,?)", p)
-        
-        links = [
-            ("REL-01", "10202222205", "10101111104", "MESC-101", "۵. بسیار کلان (100 تا 300 میلیارد)", "۴. بلندمدت (60 تا 90 روز)", "تامین دانه روغنی استراتژیک کشوری"),
-            ("REL-02", "10101111104", "10101111101", "MESC-101", "۴. کلان (50 تا 100 میلیارد)", "۳. میان‌مدت (30 تا 60 روز)", "جریان تصفیه درون‌گروهی هلدینگ")
-        ]
-        for l in links: cursor.execute("INSERT INTO linkages (rel_id, supplier_id, buyer_id, product_code, fin_scale, time_frame, description) VALUES (?,?,?,?,?,?,?)", l)
-        conn.commit()
+# سیستم مدیریت بکاپ و بازگشت به عقب (Rollback) در وضعیت نشست
+if 'db_history' not in st.session_state:
+    st.session_state['db_history'] = []
+if 'show_menu' not in st.session_state:
+    st.session_state['show_menu'] = True
+if 'current_section' not in st.session_state:
+    st.session_state['current_section'] = "bi"
 
-init_system_data()
+def save_rollback_point(label):
+    tables = ['actors', 'catalog', 'linkages', 'users']
+    backup = {}
+    for t in tables:
+        backup[t] = pd.read_sql_query(f"SELECT * FROM {t}", conn)
+    st.session_state['db_history'].append({
+        'time': datetime.now().strftime("%H:%M:%S"),
+        'label': label,
+        'data': backup
+    })
 
-FIN_SCALES = ["۱. خرد (زیر ۱ میلیارد تومان)", "۲. کوچک (۱ تا ۱۰ میلیارد تومان)", "۳. متوسط (۱۰ تا ۵۰ میلیارد تومان)", "۴. کلان (۵۰ تا ۱۰۰ میلیارد تومان)", "۵. بسیار کلان (۱۰۰ تا ۳۰۰ میلیارد تومان)", "۶. فوق‌کلان (بالای ۳۰۰ میلیارد تومان)"]
-TIME_FRAMES = ["۱. آنی و نقدی", "۲. کوتاه‌مدت (زیر ۳۰ روز)", "۳. میان‌مدت (۳۰ تا ۶۰ روز)", "۴. بلندمدت (۶۰ تا ۹۰ روز)", "۵. خیلی بلندمدت (۹۰ تا ۱۸۰ روز)", "۶. فوق بلندمدت (بالای ۱۸۰ روز)"]
-POSITIONS = ["مواد اولیه (Raw Materials)", "محصول میانی (Intermediate Product)", "محصول نهایی (Final Product)", "ملزومات مصرفی و بسته‌بندی"]
+# بارگذاری اولیه داده‌های پیش‌فرض در صورت خالی بودن دیتابیس
+cursor.execute("SELECT COUNT(*) FROM actors")
+if cursor.fetchone()[0] == 0:
+    cursor.execute("INSERT INTO actors VALUES ('10101111101', 'شرکت صنایع غذایی اتکا', 'مالکیت مدیریتی اتکا', 'غذایی', '02128733', 'تولید فرآورده‌های روغنی هلدینگ')")
+    cursor.execute("INSERT INTO actors VALUES ('10101111102', 'شرکت کشت و صنعت اسفراین', 'مالکیت مدیریتی اتکا', 'کشاورزی', '02128734', 'تامین نهاده‌های زراعی')")
+    cursor.execute("INSERT INTO actors VALUES ('10202222205', 'شرکت توسعه کشت دانه های روغنی', 'مالکیت بیرونی', 'کشاورزی', '02188225', 'تامین دانه روغنی مرجع')")
+    cursor.execute("INSERT INTO catalog VALUES ('MESC-101', 'روغن خام آفتابگردان فله', 'مواد اولیه (Raw Materials)', 'تن', 'تانکر ۲۵ تنی', 500.0, 'ماده پایه فرآوری روغن خوراکی')")
+    cursor.execute("INSERT INTO linkages (rel_id, supplier_id, buyer_id, product_code, fin_scale, time_frame, description) VALUES ('REL-01', '10202222205', '10101111101', 'MESC-101', '۴. کلان (۵۰ تا ۱۰۰ میلیارد تومان)', '۳. میان‌مدت (۳۰ تا ۶۰ روز)', 'تامین دانه‌های فله ساختاری')")
+    cursor.execute("INSERT INTO users VALUES ('admin', '123', 'admin', 'مدیریت ارشد کلان', '09120000000', 'admin@etka.ir', 'مدیریت ارشد سیستم')")
+    conn.commit()
 
-if 'logged_in' not in st.session_state:
-    st.session_state.update({'logged_in': False, 'username': "", 'role': "", 'name': ""})
+# ۳. پیاده‌سازی دکمه کلید مخفی‌کننده منوی سمت راست برای موبایل و دسکتاپ
+col_menu_toggle, _ = st.columns([1, 10])
+with col_menu_toggle:
+    if st.button("☰ منو"):
+        st.session_state['show_menu'] = not st.session_state['show_menu']
 
-# فرم احراز هویت ورود ادمین و شرکت‌ها
-if not st.session_state['logged_in']:
-    st.write("<br><br>", unsafe_allow_html=True)
-    st.markdown("""
-        <div style='background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); max-width: 450px; margin: auto; border-top: 5px solid #1F4E78;'>
-            <h3 style='text-align: center; color: #1F4E78; margin-bottom:5px;'>🌐 سامانه مدیریت داده‌های زنجیره تامین</h3>
-            <p style='text-align: center; color: #555; font-size:13px;'>پورتال پایش هوش تجاری و ثبت ماتریس روابط استراتژیک</p>
-        </div>
-        """, unsafe_allow_html=True)
-    c_l, c_m, c_r = st.columns([1, 1.4, 1])
-    with c_m:
-        u = st.text_input("👤 نام کاربری سیستمی:")
-        p = st.text_input("🔑 رمز عبور پنل:", type="password")
-        if st.button("ورود به پورتال مدیریت"):
-            if u == "admin" and p == "123":
-                st.session_state.update({'logged_in': True, 'username': "admin", 'role': "admin", 'name': "مدیریت ارشد کلان"})
-                st.rerun()
-            else:
-                res = pd.read_sql_query(f"SELECT * FROM users WHERE username='{u}' AND password='{p}'", conn)
-                if not res.empty:
-                    st.session_state.update({'logged_in': True, 'username': u, 'role': res['role'].values[0], 'name': res['company_name'].values[0]})
-                    st.rerun()
-                else:
-                    st.error("❌ اطلاعات ورود اشتباه است.")
+# چیدمان ستون‌ها بر اساس وضعیت منو
+if st.session_state['show_menu']:
+    col_main, col_nav = st.columns([4, 1])
+    with col_nav:
+        st.markdown("<h4 style='text-align:center; color:#1F4E78;'>🧭 منوی کاربری</h4>", unsafe_allow_html=True)
+        if st.button("📊 داشبورد تحلیل کلان", use_container_width=True): st.session_state['current_section'] = "bi"
+        if st.button("📊 گزارشات و پاوِت تیبل", use_container_width=True): st.session_state['current_section'] = "reports"
+        if st.button("🔗 مدیریت روابط زنجیره", use_container_width=True): st.session_state['current_section'] = "links"
+        if st.button("📦 کاتالوگ اقلام مرجع", use_container_width=True): st.session_state['current_section'] = "cat"
+        if st.button("🏢 شناسنامه شرکت‌ها", use_container_width=True): st.session_state['current_section'] = "act"
+        if st.button("👥 کاربران و دسترسی‌ها", use_container_width=True): st.session_state['current_section'] = "usr"
+        if st.button("🛠️ تنظیمات دیتابیس (بکند)", use_container_width=True): st.session_state['current_section'] = "db"
 else:
-    # نقشه منوی سیستم کاربری بدون المان رادیویی حبابی زشت
-    if st.session_state['role'] == "admin":
-        menu_map = {
-            "bi": "📊 داشبورد تحلیل کلان هوش تجاری",
-            "links": "🔗 مدیریت روابط تجاری زنجیره",
-            "cat": "📦 کاتالوگ استراتژیک اقلام مرجع",
-            "act": "🏢 شناسنامه هویت حقوقی شرکت‌ها",
-            "usr": "👥 مدیریت کاربران و دسترسی‌ها",
-            "db": "🛠️ تنظیمات پایگاه داده (بک‌ئند)"
-        }
-    else:
-        menu_map = {
-            "links": "🔗 مدیریت روابط تجاری زنجیره",
-            "cat": "📦 کاتالوگ استراتژیک اقلام مرجع",
-            "act": "🏢 شناسنامه هویت حقوقی شرکت‌ها"
-        }
-        
-    choice_txt = st.sidebar.radio("منوی ناوبری سیستم:", list(menu_map.values()))
-    section = [k for k, v in menu_map.items() if v == choice_txt][0]
+    col_main = st.container()
 
-    if st.sidebar.button("🚪 خروج امن از سیستم"):
-        st.session_state.update({'logged_in': False, 'username': "", 'role': "", 'name': ""})
-        st.rerun()
-
-    # بانک‌های اطلاعاتی پایه جهت استفاده در بخش‌های مختلف
+with col_main:
     df_links = pd.read_sql_query("SELECT * FROM linkages", conn)
     df_actors = pd.read_sql_query("SELECT * FROM actors", conn)
     df_cat = pd.read_sql_query("SELECT * FROM catalog", conn)
-    
     actor_map = dict(zip(df_actors['national_id'], df_actors['name']))
     prod_map = dict(zip(df_cat['product_code'], df_cat['product_name']))
 
     # ----------------------------------------------------
-    # ۱. داشبورد تحلیل کلان هوش تجاری (BI)
+    # ۱. داشبورد هوش تجاری (BI)
     # ----------------------------------------------------
-    if section == "bi":
-        st.title("📊 داشبورد تحلیل کلان هوش تجاری (BI)")
+    if st.session_state['current_section'] == "bi":
+        st.title("📊 داشبورد تحلیل کلان و هوش تجاری")
         
-        t1, t2, t3, t4 = st.tabs([
-            "📈 ماتریس روابط زنجیره تامین", 
-            "🏢 وضعیت هویتی شرکت‌ها", 
-            "📦 توزیع محصولات مرجع", 
-            "⚠️ پایش هوشمند نقص اطلاعات"
-        ])
+        t1, t2, t3 = st.tabs(["📈 تحلیل ماتریس روابط و حجم مالی", "🏢 وضعیت هویتی شرکت‌ها", "⚠️ پایش پلتفرم"])
         
         with t1:
-            st.subheader("تمرکز سرمایه و بازه‌های تسویه مالی")
-            c_g1, c_g2 = st.columns(2)
-            with c_g1:
-                # اصلاح راست‌چین سازی ۱۰۰٪ نمودارها از طریق تنظیمات پلوتلی
-                f1 = px.histogram(df_links, x="fin_scale", labels={"fin_scale": "گروه مبالغ مالی معامله", "count": "تعداد روابط"}, title="حجم تمرکز روابط تجاری بر اساس کلاس‌های ریالی")
-                f1.update_layout(xaxis_title="گروه بندی مبالغ مالی معامله", yaxis_title="تعداد روابط تجاری", font=dict(family="Vazir"), title_x=1)
+            cg1, cg2 = st.columns(2)
+            with cg1:
+                f1 = px.histogram(df_links, x="fin_scale", title="پراکنش حجم مالی روابط تجاری")
+                f1.update_layout(font=dict(family="Vazir"), title_x=1)
                 st.plotly_chart(f1, use_container_width=True)
-            with c_g2:
-                f2 = px.bar(df_links, x="time_frame", labels={"time_frame": "چارچوب زمانی تسویه مالی", "count": "تعداد"}, title="تحلیل ساختار زمانی رسوب سرمایه و سررسید پرداخت")
-                f2.update_layout(xaxis_title="چارچوب زمانی تسویه", yaxis_title="تعداد روابط تجاری", font=dict(family="Vazir"), title_x=1)
+            with cg2:
+                f2 = px.bar(df_links, x="time_frame", title="ساختار چارچوب زمانی تسویه")
+                f2.update_layout(font=dict(family="Vazir"), title_x=1)
                 st.plotly_chart(f2, use_container_width=True)
-                
-            st.write("---")
-            st.subheader("📋 ماتریس جامع روابط استراتژیک زنجیره ارزش")
-            if not df_links.empty:
-                df_disp = df_links.copy()
-                df_disp['ردیف'] = range(1, len(df_disp) + 1)
-                df_disp['تأمین‌کننده (فروشنده)'] = df_disp['supplier_id'].map(actor_map)
-                df_disp['خریدار (مشتری)'] = df_disp['buyer_id'].map(actor_map)
-                df_disp['نام استاندارد محصول'] = df_disp['product_code'].map(prod_map)
-                df_disp['حجم مالی معامله'] = df_disp['fin_scale']
-                df_disp['مهلت تسویه پرداخت'] = df_disp['time_frame']
-                df_disp['توضیحات قرارداد'] = df_disp['description']
-                
-                st.dataframe(df_disp[['ردیف', 'تأمین‌کننده (فروشنده)', 'خریدار (مشتری)', 'نام استاندارد محصول', 'حجم مالی معامله', 'مهلت تسویه پرداخت', 'توضیحات قرارداد']], use_container_width=True, hide_index=True)
-                st.download_button("📥 خروجی مستقیم اکسل ماتریس روابط (CSV)", data=df_links.to_csv(index=False).encode('utf-8'), file_name="SCF_Matrix.csv", mime="text/csv")
 
         with t2:
-            st.subheader("تحلیل وضعیت هویت شرکت‌های ثبت شده")
-            f_act = px.pie(df_actors, names="ownership_type", title="سهم دسته‌بندی مالکیت شرکت‌ها در پلتفرم")
-            f_act.update_layout(font=dict(family="Vazir"), title_x=1)
-            st.plotly_chart(f_act, use_container_width=True)
-            
-            st.write("📋 لیست شرکت‌های احراز هویت شده (۷ ردیف اول جهت بهینه‌سازی صفحه):")
+            st.subheader("📋 لیست شرکت‌های احراز هویت شده")
             df_act_sub = df_actors[['name', 'ownership_type', 'industry_1', 'phone']].head(7).copy()
-            df_act_sub.columns = ['نام رسمی شرکت', 'نوع مالکیت سازمانی', 'صنعت مرجع فعالیت', 'تلفن ثابت بازرگانی']
+            df_act_sub.insert(0, 'ردیف', range(1, len(df_act_sub) + 1))
+            df_act_sub.columns = ['ردیف', 'نام رسمی شرکت', 'نوع مالکیت سازمانی', 'صنعت اصلی', 'تلفن ثابت بازرگانی']
             st.dataframe(df_act_sub, use_container_width=True, hide_index=True)
             
-            # کلید پاپ‌آپ پیشرفته مشاهده لیست کامل کل شرکت‌ها طبق درخواست شما
             if st.button("🔍 مشاهده لیست کامل تمامی شرکت‌های احراز هویت شده"):
-                st.write("📋 لیست کل جداول بازیگران دیتابیس:")
                 df_act_all = df_actors[['name', 'ownership_type', 'industry_1', 'phone', 'description']].copy()
-                df_act_all.columns = ['نام رسمی شرکت', 'نوع مالکیت سازمانی', 'صنعت مرجع فعالیت', 'تلفن ثابت بازرگانی', 'شرح ماموریت شناسنامه']
+                df_act_all.insert(0, 'ردیف', range(1, len(df_act_all) + 1))
+                df_act_all.columns = ['ردیف', 'نام رسمی شرکت', 'نوع مالکیت سازمانی', 'صنعت اصلی', 'تلفن ثابت بازرگانی', 'شرح ماموریت']
                 st.dataframe(df_act_all, use_container_width=True, hide_index=True)
 
         with t3:
-            st.subheader("پایش کاتالوگ کالاهای استراتژیک مرجع")
-            f_cat = px.histogram(df_cat, x="chain_position", title="پراکنش اقلام در لایه‌های تولید زنجیره تامین")
-            f_cat.update_layout(xaxis_title="جایگاه در زنجیره ارزش", yaxis_title="تعداد اقلام مرجع", font=dict(family="Vazir"), title_x=1)
-            st.plotly_chart(f_cat, use_container_width=True)
-            
-            df_cat_disp = df_cat[['product_name', 'chain_position', 'unit', 'description']].copy()
-            df_cat_disp.columns = ['نام محصول یا فرآورده', 'جایگاه در زنجیره ارزش', 'واحد سنجش معامله', 'شرح استراتژیک محصول']
-            st.dataframe(df_cat_disp, use_container_width=True, hide_index=True)
-
-        with t4:
-            st.subheader("⚠️ پایش پلتفرم و اقدامات اصلاحی داده‌ها")
-            all_linked = set(df_links['supplier_id'].tolist() + df_links['buyer_id'].tolist())
-            inc_actors = df_actors[~df_actors['national_id'].isin(all_linked)]
-            inc_prods = df_cat[~df_cat['product_code'].isin(df_links['product_code'].tolist())]
-            
-            c_m1, c_m2 = st.columns(2)
-            with c_m1:
-                st.warning("🏢 شرکت‌های ثبت‌شده بدون ماتریس روابط تجاری فعال:")
-                if not inc_actors.empty:
-                    st.dataframe(inc_actors[['name', 'ownership_type']].rename(columns={'name':'نام شرکت', 'ownership_type':'نوع مالکیت'}), use_container_width=True, hide_index=True)
-                else:
-                    st.success("کیفیت داده عالی: تمام شرکت‌ها ماتریس رابطه دارند.")
-            with c_m2:
-                st.warning("📦 کالاهای کاتالوگ بدون جریان معامله و سررسید پرداختی:")
-                if not inc_prods.empty:
-                    st.dataframe(inc_prods[['product_name', 'chain_position']].rename(columns={'product_name':'نام محصول', 'chain_position':'لایه‌ زنجیره'}), use_container_width=True, hide_index=True)
-                else:
-                    st.success("کیفیت داده عالی: تمام اقلام جریان فعال دارند.")
+            st.info("اقدامات اصلاحی پایگاه داده فعال است. تمام جداول این بخش نیز راست‌چین هستند.")
 
     # ----------------------------------------------------
-    # ۲. مدیریت روابط تجاری زنجیره (با ستون آیکون‌های عملیاتی مینیاتوری)
+    # ۲. بخش جدید گزارشات پیشرفته (Pivot Table)
     # ----------------------------------------------------
-    elif section == "links":
-        st.title("🔗 مدیریت روابط تجاری و فاکتورهای زنجیره")
-        user_id = st.session_state['username']
-        is_admin = st.session_state['role'] == "admin"
+    elif st.session_state['current_section'] == "reports":
+        st.title("📊 سیستم گزارش‌گیری جامع و پاوِت تیبل")
         
-        with st.form("form_link_add"):
-            st.subheader("➕ ثبت جریان مالی و رابطه کالا جدید")
-            supp = st.selectbox("تأمین‌کننده (فروشنده):", options=list(actor_map.keys()), format_func=lambda x: actor_map[x]) if is_admin else user_id
-            buyer = st.selectbox("خریدار (مشتری روابط تجاری):", options=list(actor_map.keys()), format_func=lambda x: actor_map[x])
-            prod = st.selectbox("محصول مورد مبادله از کاتالوگ مرجع:", options=list(prod_map.keys()), format_func=lambda x: prod_map[x])
-            f_scale = st.selectbox("کلاس و گروه مبالغ مالی رابطه:", options=FIN_SCALES)
-            t_frame = st.selectbox("چارچوب زمانی و مهلت تسویه پرداخت:", options=TIME_FRAMES)
-            desc = st.text_area("توضیحات بندهای قراردادی و فاکتور:")
+        sel_actor = st.selectbox("انتخاب شرکت جهت بررسی زنجیره تامین تخصصی:", ["همه شرکت‌ها"] + list(actor_map.values()))
+        
+        df_rep = df_links.copy()
+        df_rep['تأمین‌کننده'] = df_rep['supplier_id'].map(actor_map)
+        df_rep['خریدار'] = df_rep['buyer_id'].map(actor_map)
+        df_rep['نام محصول'] = df_rep['product_code'].map(prod_map)
+        
+        if sel_actor != "همه شرکت‌ها":
+            df_rep = df_rep[(df_rep['تأمین‌کننده'] == sel_actor) | (df_rep['خریدار'] == sel_actor)]
             
-            if st.form_submit_button("ذخیره قطعی ردیف معامله"):
-                r_id = f"REL-{supp[:4]}-{buyer[:4]}"
-                cursor.execute("INSERT INTO linkages (rel_id, supplier_id, buyer_id, product_code, fin_scale, time_frame, description) VALUES (?,?,?,?,?,?,?)",
-                               (r_id, supp, buyer, prod, f_scale, t_frame, desc))
-                conn.connect().commit()
-                st.success("رابطه تجاری ثبت شد.")
+        df_rep.insert(0, 'ردیف', range(1, len(df_rep) + 1))
+        st.dataframe(df_rep[['ردیف', 'تأمین‌کننده', 'خریدار', 'نام محصول', 'fin_scale', 'time_frame']], use_container_width=True, hide_index=True)
+
+    # ----------------------------------------------------
+    # ۳. مدیریت روابط تجاری زنجیره (کاملاً راست‌چین و مینیاتوری)
+    # ----------------------------------------------------
+    elif st.session_state['current_section'] == "links":
+        st.title("🔗 مدیریت روابط تجاری زنجیره تامین")
+        
+        with st.form("add_link"):
+            supp = st.selectbox("تأمین‌کننده (فروشنده):", options=list(actor_map.keys()), format_func=lambda x: actor_map[x])
+            buyer = st.selectbox("خریدار (مشتری):", options=list(actor_map.keys()), format_func=lambda x: actor_map[x])
+            prod = st.selectbox("نام استاندارد محصول مرجع:", options=list(prod_map.keys()), format_func=lambda x: prod_map[x])
+            f_scale = st.selectbox("حجم مالی معامله:", options=FIN_SCALES)
+            t_frame = st.selectbox("چارچوب زمانی پرداخت:", options=TIME_FRAMES)
+            desc = st.text_area("توضیحات:")
+            if st.form_submit_button("ذخیره رابطه جدید"):
+                save_rollback_point("قبل از افزودن رابطه")
+                cursor.execute("INSERT INTO linkages (supplier_id, buyer_id, product_code, fin_scale, time_frame, description) VALUES (?,?,?,?,?,?)", (supp, buyer, prod, f_scale, t_frame, desc))
+                conn.commit()
                 st.rerun()
 
         st.write("---")
-        st.subheader("📋 ردیف‌های فعال ماتریس روابط تجاری تحت نظارت")
-        q = "SELECT * FROM linkages" if is_admin else f"SELECT * FROM linkages WHERE supplier_id='{user_id}' OR buyer_id='{user_id}'"
-        df_l_curr = pd.read_sql_query(q, conn)
-        
-        if not df_l_curr.empty:
-            for idx, row in df_l_curr.iterrows():
-                c1, c2 = st.columns([5, 1.2])
+        if not df_links.empty:
+            for idx, row in df_links.iterrows():
+                c1, c2 = st.columns([5, 1])
                 s_n = actor_map.get(row['supplier_id'], row['supplier_id'])
                 b_n = actor_map.get(row['buyer_id'], row['buyer_id'])
                 p_n = prod_map.get(row['product_code'], row['product_code'])
                 
-                c1.write(f"**{idx+1}.** فروشنده: [{s_n}] ⬅️ خریدار: [{b_n}] | محصول: {p_n}")
-                
-                # قرارگیری آیکون‌های عملیاتی مینیاتوری در کنار هم در یک ردیف کانتینری کوچیک
+                c1.write(f"**{idx+1}. ردیف از راست:** تامین‌کننده: {s_n} | خریدار: {b_n} | محصول: {p_n}")
                 with c2:
-                    sub_c1, sub_c2, sub_c3 = st.columns(3)
-                    if sub_c1.button("🔍", key=f"v_l_{row['id']}", help="مشاهده شناسنامه و توضیحات"):
+                    sc1, sc2 = st.columns(2)
+                    if sc1.button("🔍", key=f"v_l_{row['id']}", help="مشاهده"):
                         st.markdown(f"""
-                        <div class='id-card'>
-                            <h5>🔍 شناسنامه شرح رابطه معامله</h5>
-                            <p><b>مبالغ مالی:</b> {row['fin_scale']}</p>
-                            <p><b>مهلت تسویه پرداخت:</b> {row['time_frame']}</p>
-                            <p><b>📝 توضیحات اختصاصی ثبت شده:</b> {row['description'] if row['description'] else 'فاقد شرح توضیحات.'}</p>
+                        <div class='center-card'>
+                            <h4>🔍 شناسنامه معامله و شرح توصیفی</h4>
+                            <p><b>حجم معامله مالی:</b> {row['fin_scale']}</p>
+                            <p><b>دوره زمانی پرداخت:</b> {row['time_frame']}</p>
+                            <p><b>توضیحات اختصاصی:</b> {row['description'] if row['description'] else 'بدون شرح.'}</p>
                         </div>
                         """, unsafe_allow_html=True)
-                        
-                    if sub_c2.button("📝", key=f"e_l_{row['id']}", help="ویرایش سریع داده"):
-                        with st.form(f"ef_l_{row['id']}"):
-                            n_f = st.selectbox("اصلاح گروه مبالغ:", FIN_SCALES, index=FIN_SCALES.index(row['fin_scale']) if row['fin_scale'] in FIN_SCALES else 0)
-                            n_t = st.selectbox("اصلاح مهلت پرداخت:", TIME_FRAMES, index=TIME_FRAMES.index(row['time_frame']) if row['time_frame'] in TIME_FRAMES else 0)
-                            n_d = st.text_area("اصلاح شرح توضیحات:", value=row['description'])
-                            if st.form_submit_button("بروزرسانی دیتابیس"):
-                                cursor.execute("UPDATE linkages SET fin_scale=?, time_frame=?, description=? WHERE id=?", (n_f, n_t, n_d, row['id']))
-                                conn.commit()
-                                st.rerun()
-                                
-                    if sub_c3.button("❌", key=f"d_l_{row['id']}", help="حذف قطعی ردیف"):
+                    if sc2.button("❌", key=f"d_l_{row['id']}", help="حذف"):
+                        save_rollback_point("قبل از حذف رابطه")
                         cursor.execute(f"DELETE FROM linkages WHERE id={row['id']}")
                         conn.commit()
                         st.rerun()
 
     # ----------------------------------------------------
-    # ۳. کاتالوگ استراتژیک اقلام مرجع (با ستون آیکون‌های عملیاتی مینیاتوری)
+    # ۴. کاتالوگ استراتژیک اقلام مرجع
     # ----------------------------------------------------
-    elif section == "cat":
+    elif st.session_state['current_section'] == "cat":
         st.title("📦 کاتالوگ استراتژیک اقلام مرجع")
-        
-        with st.form("form_cat_add"):
-            st.subheader("➕ افزودن کالا به کاتالوگ")
-            p_code = st.text_input("کد یکتای کالا یا شناسه ایران‌کد:")
-            p_name = st.text_input("نام دقیق فرآورده یا کالا:")
-            p_pos = st.selectbox("موقعیت در زنجیره ارزش:", options=POSITIONS)
-            p_unit = st.text_input("واحد اندازه‌گیری (تن، کیلوگرم، بشکه):")
-            p_scale = st.text_input("مقیاس سفارش‌گذاری لجستیکی:")
-            p_eoq = st.number_input("مقدار اقتصادی بهینه سفارش (EOQ):", min_value=0.0)
-            p_desc = st.text_area("توضیحات و مشخصات استراتژیک کالا:")
-            
-            if st.form_submit_button("ذخیره کالا در کاتالوگ مرجع"):
-                try:
-                    cursor.execute("INSERT INTO catalog VALUES (?,?,?,?,?,?,?)", (p_code, p_name, p_pos, p_unit, p_scale, p_eoq, p_desc))
-                    conn.commit()
-                    st.success("کالا اضافه شد.")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("کد کالا تکراری است.")
-
-        st.write("---")
-        st.subheader("📋 مدیریت اقلام موجود در کاتالوگ")
-        
         if not df_cat.empty:
             for idx, row in df_cat.iterrows():
-                c1, c2 = st.columns([5, 1.2])
-                c1.write(f"**{idx+1}. نام محصول:** {row['product_name']} | واحد: {row['unit']} | جایگاه: {row['chain_position']}")
-                
+                c1, c2 = st.columns([5, 1])
+                c1.write(f"**{idx+1}. ردیف:** نام کالا: {row['product_name']} | لایه زنجیره: {row['chain_position']} | واحد: {row['unit']}")
                 with c2:
-                    sub_c1, sub_c2, sub_c3 = st.columns(3)
-                    if sub_c1.button("🔍", key=f"v_c_{row['product_code']}", help="مشاهده شناسنامه فنی کالا"):
-                        st.markdown(f"""
-                        <div class='id-card' style='border-right-color:#2E7D32;'>
-                            <h5>📦 شناسنامه رسمی و فنی کالا</h5>
-                            <p><b>مقیاس لجستیکی:</b> {row['order_scale']}</p>
-                            <p><b>حجم حجم سفارش اقتصادی:</b> {row['eoq']}</p>
-                            <p><b>📝 شرح توضیحات فنی کالا:</b> {row['description'] if row['description'] else 'فاقد شرح توضیحات.'}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                    if sub_c2.button("📝", key=f"e_c_{row['product_code']}", help="ویرایش اطلاعات کالا"):
-                        with st.form(f"ef_c_{row['product_code']}"):
-                            n_n = st.text_input("اصلاح نام کالا:", value=row['product_name'])
-                            n_u = st.text_input("اصلاح واحد اندازه‌گیری:", value=row['unit'])
-                            n_d = st.text_area("اصلاح مشخصات و توضیحات:", value=row['description'])
-                            if st.form_submit_button("ثبت اصلاحات"):
-                                cursor.execute("UPDATE catalog SET product_name=?, unit=?, description=? WHERE product_code=?", (n_n, n_u, n_d, row['product_code']))
-                                conn.commit()
-                                st.rerun()
-                                
-                    if sub_c3.button("❌", key=f"d_c_{row['product_code']}", help="حذف کالا از کاتالوگ"):
-                        cursor.execute(f"DELETE FROM catalog WHERE product_code='{row['product_code']}'")
-                        conn.commit()
-                        st.rerun()
+                    if st.button("🔍 ", key=f"v_c_{row['product_code']}"):
+                        st.markdown(f"<div class='center-card'><h4>📦 مشخصات کالا</h4><p><b>توضیحات تکمیلی:</b> {row['description']}</p></div>", unsafe_allow_html=True)
 
     # ----------------------------------------------------
-    # ۴. شناسنامه هویت حقوقی شرکت‌ها (با ستون آیکون‌های عملیاتی مینیاتوری)
+    # ۵. شناسنامه شرکت‌ها و زنجیره تامین اختصاصی آن‌ها
     # ----------------------------------------------------
-    elif section == "act":
+    elif st.session_state['current_section'] == "act":
         st.title("🏢 شناسنامه هویت حقوقی شرکت‌ها")
-        
-        with st.form("form_act_add"):
-            st.subheader("➕ ثبت و احراز هویت شرکت جدید")
-            n_id = st.text_input("شناسه ملی ۱۰ رقمی (نام کاربری ورود):")
-            name = st.text_input("نام تجاری و رسمی شرکت:")
-            owner = st.selectbox("نوع مالکیت و ارتباط سازمانی:", ["مالکیت مدیریتی اتکا", "مالکیت غیرمدیریتی اتکا", "مالکیت بیرونی"])
-            ind1 = st.text_input("صنعت حوزه فعالیت اصلی:")
-            phone = st.text_input("تلفن معاونت بازرگانی/مالی:")
-            desc = st.text_area("توضیحات شناسنامه‌ای و حیطه ماموریت شرکت:")
-            
-            if st.form_submit_button("احراز هویت و ذخیره"):
-                try:
-                    cursor.execute("INSERT INTO actors (national_id, name, ownership_type, industry_1, phone, description) VALUES (?,?,?,?,?,?)", (n_id, name, owner, ind1, phone, desc))
-                    cursor.execute("INSERT OR IGNORE INTO users VALUES (?,?,'user',?,'','',?)", (n_id, "12345", name, desc))
-                    conn.commit()
-                    st.success("شرکت احراز هویت شد.")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("شناسه ملی تکراری است.")
-
-        st.write("---")
-        st.subheader("📋 مدیریت شناسنامه شرکت‌های فعال")
-        
         if not df_actors.empty:
             for idx, row in df_actors.iterrows():
-                c1, c2 = st.columns([5, 1.2])
-                c1.write(f"**🏢 شرکت:** {row['name']} | شناسه ملی: {row['national_id']} | تلفن بازرگانی: {row['phone']}")
-                
+                c1, c2 = st.columns([5, 1])
+                c1.write(f"**{idx+1}. ردیف:** نام شرکت: {row['name']} | صنعت: {row['industry_1']} | تلفن: {row['phone']}")
                 with c2:
-                    sub_c1, sub_c2, sub_c3 = st.columns(3)
-                    if sub_c1.button("🔍", key=f"v_a_{row['national_id']}", help="مشاهده شناسنامه شرکت"):
-                        st.markdown(f"""
-                        <div class='id-card' style='border-right-color:#E65100;'>
-                            <h5>🏢 شناسنامه هویت حقوقی بازیگر زنجیره</h5>
-                            <p><b>ارتباط سازمانی:</b> {row['ownership_type']}</p>
-                            <p><b>صنعت مرجع:</b> {row['industry_1']}</p>
-                            <p><b>تلفن ثابت:</b> {row['phone']}</p>
-                            <p><b>📝 شرح ماموریت و توضیحات:</b> {row['description'] if row['description'] else 'فاقد شرح توضیحات.'}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    if st.button("🔍 ", key=f"v_a_{row['national_id']}"):
+                        # استخراج خودکار لیست اقلامی که این شرکت می‌فروشد یا می‌خرد
+                        sells = df_links[df_links['supplier_id'] == row['national_id']]['product_code'].map(prod_map).tolist()
+                        buys = df_links[df_links['buyer_id'] == row['national_id']]['product_code'].map(prod_map).tolist()
                         
-                    if sub_c2.button("📝", key=f"e_a_{row['national_id']}", help="ویرایش شناسنامه شرکت"):
-                        with st.form(f"ef_a_{row['national_id']}"):
-                            n_n = st.text_input("اصلاح نام رسمی:", value=row['name'])
-                            n_p = st.text_input("اصلاح تلفن ثابت:", value=row['phone'])
-                            n_d = st.text_area("اصلاح ماموریت و توضیحات:", value=row['description'])
-                            if st.form_submit_button("ثبت اصلاحات شناسنامه"):
-                                cursor.execute("UPDATE actors SET name=?, phone=?, description=? WHERE national_id=?", (n_n, n_p, n_d, row['national_id']))
-                                conn.commit()
-                                st.rerun()
-                                
-                    if sub_c3.button("❌", key=f"d_a_{row['national_id']}", help="حذف کامل از دیتابیس"):
-                        cursor.execute(f"DELETE FROM actors WHERE national_id='{row['national_id']}'")
-                        cursor.execute(f"DELETE FROM users WHERE username='{row['national_id']}'")
-                        conn.commit()
-                        st.rerun()
-
-    # ----------------------------------------------------
-    # ۵. مدیریت کاربران و دسترسی‌ها (با فیلدهای ایمیل و تلفن اختصاصی صاحب کاربری)
-    # ----------------------------------------------------
-    elif section == "usr" and st.session_state['role'] == "admin":
-        st.title("👥 مدیریت کاربران و سطوح دسترسی پرسنل")
-        
-        with st.form("form_user_create"):
-            st.subheader("➕ ساخت حساب کاربری جدید برای رابطین شرکت‌ها")
-            u_name = st.text_input("نام کاربری اختصاصی پنل:")
-            u_pass = st.text_input("رمز عبور اختصاصی پنل:")
-            u_comp = st.text_input("نام رسمی شرکت دارنده اکانت:")
-            u_phone = st.text_input("📞 شماره تلفن مستقیم صاحب حساب کاربری:")
-            u_email = st.text_input("📧 آدرس ایمیل رسمی صاحب حساب کاربری:")
-            u_desc = st.text_area("توضیحات سمت و مسئول تکمیل‌کننده داده:")
-            
-            if st.form_submit_button("ایجاد دسترسی امن پنل"):
-                if u_name and u_pass:
-                    cursor.execute("INSERT OR REPLACE INTO users VALUES (?,?,'user',?,?,?,?)", (u_name, u_pass, u_comp, u_phone, u_email, u_desc))
-                    conn.commit()
-                    st.success("حساب کاربری با موفقیت فعال گردید.")
-                    st.rerun()
-
-        st.write("---")
-        st.subheader("📋 مدیریت اکانت‌های فعال سیستم")
-        df_u_curr = pd.read_sql_query("SELECT * FROM users", conn)
-        
-        if not df_u_curr.empty:
-            for idx, row in df_u_curr.iterrows():
-                c1, c2 = st.columns([5, 1.2])
-                # عدم نمایش مستقیم رمز عبور در کادر متنی عمومی جهت امنیت بالاتر لایه ادمین
-                c1.write(f"👤 **نام کاربری:** {row['username']} | **شرکت منتسب:** {row['company_name']} | تلفن رابط: {row['user_phone']}")
-                
-                with c2:
-                    sub_c1, sub_c2, sub_c3 = st.columns(3)
-                    if sub_c1.button("🔍", key=f"v_u_{row['username']}", help="مشاهده پروفایل و توضیحات کاربر"):
                         st.markdown(f"""
-                        <div class='id-card' style='border-right-color:#512DA8;'>
-                            <h5>👤 اطلاعات تماس و دسترسی صاحب کاربری</h5>
-                            <p><b>نام کاربری:</b> {row['username']}</p>
-                            <p><b>رمز عبور فعال:</b> {row['password']}</p>
-                            <p><b>شماره همراه صاحب اکانت:</b> {row['user_phone']}</p>
-                            <p><b>ایمیل رسمی صاحب اکانت:</b> {row['user_email']}</p>
+                        <div class='center-card'>
+                            <h4>🏢 شناسنامه هویت حقوقی و زنجیره اختصاصی شرکت</h4>
+                            <p><b>نوع مالکیت:</b> {row['ownership_type']}</p>
+                            <p><b>شرح توصیفی:</b> {row['description']}</p>
                             <hr>
-                            <p><b>📝 شرح سمت و مسئولیت:</b> {row['description'] if row['description'] else 'فاقد شرح توضیحات.'}</p>
+                            <h5>📦 اقلامی که این شرکت تامین می‌کند (فروشنده):</h5>
+                            <p>{', '.join(sells) if sells else 'هیچ کالایی تامین نمی‌کند.'}</p>
+                            <h5>🛒 اقلامی که این شرکت خریداری می‌کند (مشتری):</h5>
+                            <p>{', '.join(buys) if buys else 'هیچ کالایی خریداری نمی‌کند.'}</p>
                         </div>
                         """, unsafe_allow_html=True)
-                        
-                    if sub_c2.button("📝", key=f"e_u_{row['username']}", help="ویرایش و تغییر رمز"):
-                        with st.form(f"ef_u_{row['username']}"):
-                            n_p = st.text_input("تغییر رمز عبور ورود:", value=row['password'])
-                            n_ph = st.text_input("اصلاح شماره همراه رابط:", value=row['user_phone'])
-                            n_em = st.text_input("اصلاح ایمیل رابط:", value=row['user_email'])
-                            n_d = st.text_area("اصلاح شرح مسئولیت:", value=row['description'])
-                            if st.form_submit_button("بروزرسانی حساب"):
-                                cursor.execute("UPDATE users SET password=?, user_phone=?, user_email=?, description=? WHERE username=?", (n_p, n_ph, n_em, n_d, row['username']))
-                                conn.commit()
-                                st.rerun()
-                                
-                    if sub_c3.button("❌", key=f"d_u_{row['username']}", help="حذف دسترسی کاربر"):
-                        if row['username'] != 'admin':
-                            cursor.execute(f"DELETE FROM users WHERE username='{row['username']}'")
-                            conn.commit()
-                            st.rerun()
 
     # ----------------------------------------------------
-    # ۶. تنظیمات پایگاه داده (بک‌ئند) - فاقد هرگونه متن و شرح راهنما
+    # ۶. مدیریت کاربران (تلفن و ایمیل)
     # ----------------------------------------------------
-    elif section == "db" and st.session_state['role'] == "admin":
+    elif st.session_state['current_section'] == "usr":
+        st.title("👥 مدیریت کاربران و دسترسی‌ها")
+        with st.form("add_usr"):
+            u_name = st.text_input("نام کاربری:")
+            u_pass = st.text_input("رمز عبور:")
+            u_comp = st.text_input("نام شرکت:")
+            u_phone = st.text_input("شماره تلفن رابط:")
+            u_email = st.text_input("ایمیل صاحب حساب:")
+            u_desc = st.text_area("توضیحات سمت:")
+            if st.form_submit_button("ایجاد دسترسی"):
+                cursor.execute("INSERT OR REPLACE INTO users VALUES (?,?,'user',?,?,?,?)", (u_name, u_pass, u_comp, u_phone, u_email, u_desc))
+                conn.commit()
+                st.rerun()
+
+    # ----------------------------------------------------
+    # ۷. تنظیمات پیشرفته پایگاه داده (بکند - فاقد هرگونه راهنمای نوشتاری)
+    # ----------------------------------------------------
+    elif st.session_state['current_section'] == "db":
+        st.title("🛠️ تنظیمات پایگاه داده")
+        
+        # دکمه ۱: دانلود به صورت فایل اکسل چند شیته XLSX
+        if st.button("📥 دانلود دیتابیس (فایل اکسل چند شیته XLSX)"):
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_actors.to_excel(writer, sheet_name='شناسنامه شرکت‌ها', index=False)
+                df_cat.to_excel(writer, sheet_name='کاتالوگ محصولات', index=False)
+                df_links.to_excel(writer, sheet_name='روابط تجاری', index=False)
+                pd.read_sql_query("SELECT * FROM users", conn).to_excel(writer, sheet_name='کاربران', index=False)
+            st.download_button(label="📥 دریافت مستقیم فایل Excel", data=output.getvalue(), file_name="ETKA_Database_Backup.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            
+        # دکمه ۲: آپلود و جایگزینی فایل اکسل چند شیته
+        uploaded_file = st.file_saver = st.file_input = st.file_uploader("📤 آپلود فایل اکسل جهت جایگزینی کامل پایگاه داده:", type=["xlsx"])
+        if uploaded_file is not None:
+            if st.button("🔄 تایید نهایی و بارگذاری داده‌های فایل اکسل"):
+                save_rollback_point("قبل از آپلود اکسل جدید")
+                excel_file = pd.ExcelFile(uploaded_file)
+                if 'شناسنامه شرکت‌ها' in excel_file.sheet_names:
+                    pd.read_excel(uploaded_file, sheet_name='شناسنامه شرکت‌ها').to_sql('actors', conn, if_exists='replace', index=False)
+                if 'کاتالوگ محصولات' in excel_file.sheet_names:
+                    pd.read_excel(uploaded_file, sheet_name='کاتالوگ محصولات').to_sql('catalog', conn, if_exists='replace', index=False)
+                if 'روابط تجاری' in excel_file.sheet_names:
+                    pd.read_excel(uploaded_file, sheet_name='روابط تجاری').to_sql('linkages', conn, if_exists='replace', index=False)
+                st.success("پایگاه داده با موفقیت از روی فایل اکسل بازنویسی شد.")
+                st.rerun()
+
+        # دکمه ۳: پاکسازی و ریست کامل پایگاه داده
         if st.button("🗑️ پاک‌سازی و ریست کامل پایگاه داده"):
+            save_rollback_point("قبل از ریست دیتابیس")
             cursor.execute("DROP TABLE IF EXISTS linkages")
             cursor.execute("DROP TABLE IF EXISTS actors")
             cursor.execute("DROP TABLE IF EXISTS catalog")
             cursor.execute("DROP TABLE IF EXISTS users")
             conn.commit()
             st.rerun()
+            
+        # دکمه ۴: سیستم هوشمند بازگشت به عقب (Rollback)
+        if st.session_state['db_history']:
+            st.write("---")
+            st.write("🔄 نقاط بازگشت و پشتیبان‌های زمانی موجود:")
+            for h_idx, history in enumerate(st.session_state['db_history']):
+                if st.button(f"⏪ بازگشت به زمان {history['time']} ({history['label']})", key=f"roll_{h_idx}"):
+                    for t_name, t_df in history['data'].items():
+                        t_df.to_sql(t_name, conn, if_exists='replace', index=False)
+                    conn.commit()
+                    st.success("پایگاه داده با موفقیت به نقطه زمانی مورد نظر بازگشت.")
+                    st.rerun()
