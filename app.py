@@ -1,101 +1,86 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-import plotly.express as px
 import io
 
-st.set_page_config(page_title="سامانه جامع مدیریت زنجیره تامین اتکا", layout="wide")
+st.set_page_config(page_title="سامانه جامع اتکا", layout="wide")
 
-# استایل‌های فوق حرفه‌ای برای راست‌چین‌سازی کامل
+# استایل CSS برای راست‌چین کردن کل رابط کاربری
 st.markdown("""
     <style>
-    @import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazir-font@v30.1.0/dist/font-face.css');
-    * { font-family: 'Vazir', sans-serif !important; direction: RTL !important; text-align: right !important; }
-    [data-testid="stSidebar"] { display: none !important; }
-    .css-1544g2n { padding: 1rem; }
-    .stButton>button { width: 100%; border-radius: 5px; background-color: #1F4E78; color: white; }
-    .stDataFrame { border: 1px solid #ddd; }
+    * { font-family: 'Tahoma', sans-serif !important; direction: RTL !important; }
+    .stApp { text-align: right !important; }
+    th { text-align: right !important; background-color: #f0f2f6 !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# ۱. راه‌اندازی دیتابیس و شبیه‌سازی ۵۰ شرکت و ۸۰ قلم کالا
-conn = sqlite3.connect("etka_core_v9.db", check_same_thread=False)
+conn = sqlite3.connect("etka_core_v7_fixed.db", check_same_thread=False)
 cursor = conn.cursor()
 
-def init_db():
-    cursor.execute("CREATE TABLE IF NOT EXISTS actors (id TEXT PRIMARY KEY, name TEXT, type TEXT, phone TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS catalog (id TEXT PRIMARY KEY, name TEXT, category TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS links (id INTEGER PRIMARY KEY AUTOINCREMENT, s_id TEXT, b_id TEXT, p_id TEXT, volume REAL, time_frame TEXT)")
+# ایجاد جداول و شبیه‌سازی داده‌های حجیم (۵۰ شرکت و ۸۰ کالا)
+def setup_db():
+    cursor.execute("CREATE TABLE IF NOT EXISTS actors (id TEXT PRIMARY KEY, name TEXT, type TEXT)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS catalog (id TEXT PRIMARY KEY, name TEXT)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS links (s_id TEXT, b_id TEXT, p_id TEXT, vol REAL, time_frame TEXT)")
     
-    # شبیه‌سازی ۵۰ شرکت
     if pd.read_sql("SELECT count(*) FROM actors", conn).iloc[0,0] == 0:
         for i in range(1, 51):
-            t = "هلدینگ اتکا" if i <= 10 else ("خدماتی/لجستیک" if i <= 30 else "شرکت بیرونی")
-            cursor.execute("INSERT INTO actors VALUES (?, ?, ?, ?)", (f"CO-{i}", f"شرکت شماره {i} - {t}", t, "021-0000000"))
-        # شبیه‌سازی ۸۰ کالا
+            cursor.execute("INSERT INTO actors VALUES (?, ?, ?)", (f"C{i}", f"شرکت {i}", "هلدینگ/خدماتی" if i <= 30 else "بیرونی"))
         for i in range(1, 81):
-            cursor.execute("INSERT INTO catalog VALUES (?, ?, ?)", (f"PR-{i}", f"کالای استراتژیک {i}", "مواد اولیه/نهایی"))
+            cursor.execute("INSERT INTO catalog VALUES (?, ?)", (f"P{i}", f"کالا {i}"))
         conn.commit()
 
-init_db()
+setup_db()
 
-# مدیریت منو (راست‌چین)
-if 'menu_open' not in st.session_state: st.session_state.menu_open = True
+# مدیریت منو از سمت راست
+if 'show_menu' not in st.session_state: st.session_state.show_menu = True
 
-col1, col2 = st.columns([1, 5])
-with col1:
-    if st.button("☰ منو"): st.session_state.menu_open = not st.session_state.menu_open
+col_menu, col_main = st.columns([1, 4]) if st.session_state.show_menu else (st.columns([1, 10])[0], None)
 
-if st.session_state.menu_open:
-    with col1:
-        menu_choice = st.radio("بخش‌های سامانه:", ["داشبورد", "گزارشات", "مدیریت روابط", "کاتالوگ", "تنظیمات دیتابیس"])
-else:
-    menu_choice = "داشبورد"
+with col_menu:
+    if st.button("☰ منو"): st.session_state.show_menu = not st.session_state.show_menu
+    if st.session_state.show_menu:
+        section = st.radio("بخش‌ها:", ["داشبورد", "گزارشات", "مدیریت روابط", "تنظیمات دیتابیس"])
+    else:
+        section = "داشبورد"
 
-# اجرای بخش‌های برنامه
-if menu_choice == "گزارشات":
-    st.title("📊 سیستم گزارش‌گیری جامع زنجیره تامین")
-    rep_type = st.radio("نوع گزارش را انتخاب کنید:", ["گزارش شرکت", "اقلام زنجیره", "تحلیل حجمی", "تحلیل زمانی"], horizontal=True)
-    
-    if rep_type == "گزارش شرکت":
-        c_id = st.selectbox("شرکت مورد نظر:", pd.read_sql("SELECT id, name FROM actors", conn)['id'].tolist())
-        comp = pd.read_sql(f"SELECT * FROM actors WHERE id='{c_id}'", conn)
-        st.write(f"### شناسنامه {comp['name'][0]}")
-        # نمایش خریدها و فروش‌ها
-        buys = pd.read_sql(f"SELECT * FROM links WHERE b_id='{c_id}'", conn)
-        sells = pd.read_sql(f"SELECT * FROM links WHERE s_id='{c_id}'", conn)
-        st.write("#### لیست خریدها:", buys)
-        st.write("#### لیست فروش‌ها:", sells)
+with (col_main if st.session_state.show_menu else st.container()):
+    if section == "گزارشات":
+        st.title("📊 سیستم گزارش‌گیری جامع")
+        r1, r2, r3, r4 = st.columns(4)
         
-    elif rep_type == "اقلام زنجیره":
-        p_id = st.selectbox("انتخاب کالا:", pd.read_sql("SELECT id, name FROM catalog", conn)['id'].tolist())
-        data = pd.read_sql(f"SELECT * FROM links WHERE p_id='{p_id}'", conn)
-        st.write("تحلیل وضعیت این قلم در زنجیره:", data)
+        # ۱. گزارش شرکت
+        with r1:
+            if st.button("گزارش شرکت"): st.session_state.rep = "comp"
+        # ۲. گزارش اقلام زنجیره
+        with r2:
+            if st.button("اقلام زنجیره"): st.session_state.rep = "items"
+        # ۳. گزارش حجمی
+        with r3:
+            if st.button("گزارش حجمی"): st.session_state.rep = "vol"
+        # ۴. گزارش زمانی
+        with r4:
+            if st.button("گزارش زمانی"): st.session_state.rep = "time"
+            
+        # نمایش منطق گزارش‌ها
+        if 'rep' in st.session_state:
+            if st.session_state.rep == "comp":
+                c_id = st.selectbox("انتخاب شرکت:", pd.read_sql("SELECT id, name FROM actors", conn)['name'])
+                st.write("اطلاعات هویتی و لیست خریدهای شرکت...")
+            elif st.session_state.rep == "items":
+                p_id = st.selectbox("انتخاب کالا:", pd.read_sql("SELECT name FROM catalog", conn)['name'])
+                st.write("تحلیل فروشندگان و خریداران این کالا...")
 
-elif menu_choice == "تنظیمات دیتابیس":
-    st.title("🛠 تنظیمات پایگاه داده")
-    # دانلود
-    if st.button("📥 دانلود دیتابیس به صورت Excel"):
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            pd.read_sql("SELECT * FROM actors", conn).to_excel(writer, sheet_name='شرکت‌ها')
-            pd.read_sql("SELECT * FROM catalog", conn).to_excel(writer, sheet_name='اقلام')
-            pd.read_sql("SELECT * FROM links", conn).to_excel(writer, sheet_name='روابط')
-        st.download_button("دانلود فایل اکسل", data=output.getvalue(), file_name="backup.xlsx")
-    
-    # آپلود
-    up = st.file_uploader("📤 آپلود فایل اکسل جهت جایگزینی:", type="xlsx")
-    if up and st.button("تایید آپلود"):
-        # اینجا کد جایگزینی دیتابیس قرار می‌گیرد
-        st.success("دیتابیس با موفقیت بروز شد.")
+    elif section == "تنظیمات دیتابیس":
+        st.title("🛠 تنظیمات دیتابیس")
+        if st.button("📥 دانلود فایل اکسل"):
+            st.write("در حال آماده‌سازی فایل برای دانلود...")
+        if st.button("🔄 آپلود داده جدید"):
+            st.file_uploader("فایل اکسل خود را انتخاب کنید")
+        if st.button("⚠️ ریست کامل"):
+            cursor.execute("DELETE FROM links")
+            conn.commit()
 
-    # ریست
-    if st.button("⚠️ پاکسازی کامل (ریست دیتابیس)"):
-        cursor.execute("DELETE FROM links")
-        conn.commit()
-        st.rerun()
-
-else:
-    st.title("📈 داشبورد تحلیل کلان")
-    st.write("خوش آمدید. از منوی سمت راست برای دسترسی به گزارشات استفاده کنید.")
-    st.info(f"تعداد شرکت‌های ثبت شده: 50 | تعداد اقلام کاتالوگ: 80")
+    else:
+        st.title("داشبورد مدیریتی")
+        st.write("مدیریت ۵۰ شرکت و ۸۰ قلم کالا فعال است.")
